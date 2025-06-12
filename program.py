@@ -73,15 +73,15 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
     epsilon_history = []
 
     agent = DDQNAgent(env.state_size, env.action_space_n)
-    if os.path.exists(MODEL_PATH):
-        print(f"Attempting to load model from {MODEL_PATH} to continue training.")
-        try:
-            agent.load(MODEL_PATH)
-            print("Model loaded successfully.")
-        except RuntimeError as e:
-            print(f"Could not load model: {e}")
-            print("This is likely due to a change in the agent's state representation.")
-            print("A new model will be created. The old one will be overwritten upon saving.")
+    # if os.path.exists(MODEL_PATH):
+    #     print(f"Attempting to load model from {MODEL_PATH} to continue training.")
+    #     try:
+    #         agent.load(MODEL_PATH)
+    #         print("Model loaded successfully.")
+    #     except RuntimeError as e:
+    #         print(f"Could not load model: {e}")
+    #         print("This is likely due to a change in the agent's state representation.")
+    #         print("A new model will be created. The old one will be overwritten upon saving.")
 
     eps = 1.0
     # Calculate the decay rate to reach 0.01 at the last episode
@@ -97,7 +97,7 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
 
         last_score = 0
         steps_since_score_increase = 0
-        max_steps_without_progress = 1000
+        max_steps_without_progress = 600
 
         if not with_ui:
             step_bar = tqdm(desc=f"Ep {episode}", unit="step", leave=False)
