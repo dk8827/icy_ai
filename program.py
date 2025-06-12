@@ -64,6 +64,7 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
     # Calculate the decay rate to reach 0.01 at the last episode
     epsilon_decay = (0.01 / eps) ** (1 / num_episodes) if num_episodes > 0 else 0
 
+    max_score_ever = 0
     ep_bar = tqdm(range(1, num_episodes + 1), desc="Episodes", unit="ep")
     for ep in ep_bar:
         s = env.reset()
@@ -112,7 +113,8 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
 
         eps = max(0.01, eps * epsilon_decay)
         score = env.logic.score if with_ui else env.score
-        ep_bar.set_postfix(score=f"{score:5d}", reward=f"{rsum:6.1f}", eps=f"{eps:.3f}")
+        max_score_ever = max(max_score_ever, score)
+        ep_bar.set_postfix(score=f"{score:5d}", max_score=f"{max_score_ever:5d}", reward=f"{rsum:6.1f}", eps=f"{eps:.3f}")
 
     agent.save(MODEL_PATH)
     print(f"\nFinished training {num_episodes} episodes. Model saved to {MODEL_PATH}")
