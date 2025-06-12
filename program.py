@@ -54,12 +54,30 @@ def train_agent(with_ui=True, num_episodes=200):
         rsum = 0
         done = False
 
+        last_score = 0
+        steps_since_score_increase = 0
+        max_steps_without_progress = 1000
+
         if not with_ui:
             step_bar = tqdm(desc=f"Ep {ep}", unit="step", leave=False)
         
         while not done:
             a = agent.act(s, eps)
             s2, r, done, _ = env.step(a)
+
+            if not done:
+                current_score = env.logic.score if with_ui else env.score
+                if current_score > last_score:
+                    last_score = current_score
+                    steps_since_score_increase = 0
+                else:
+                    steps_since_score_increase += 1
+
+                if steps_since_score_increase >= max_steps_without_progress:
+                    done = True
+                    # A brief message for the console, not cluttering the progress bar
+                    tqdm.write(f"Episode {ep} stopped early: no score increase for {max_steps_without_progress} steps.")
+
             agent.step(s, a, r, s2, done)
             s = s2
             rsum += r
