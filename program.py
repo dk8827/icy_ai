@@ -7,10 +7,10 @@ try:
 except ImportError:
     print("Pygame or tqdm not found. UI-based modes will be unavailable.")
     pygame = None
-
+import math
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND, BUTTON_COLOR,
-    BUTTON_HOVER, TEXT_COLOR, MODEL_PATH
+    BUTTON_HOVER, TEXT_COLOR, MODEL_PATH, NUM_EPISODES
 )
 from game_logic import IcyTowerLogic
 from pygame_env import IcyTowerPygameEnv
@@ -40,7 +40,7 @@ def human_play(screen):
     env.close()
 
 
-def train_agent(with_ui=True, num_episodes=200, screen=None):
+def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
     if with_ui:
         if not screen:
             raise ValueError("A screen must be provided for UI training.")
@@ -61,6 +61,9 @@ def train_agent(with_ui=True, num_episodes=200, screen=None):
             print("A new model will be created. The old one will be overwritten upon saving.")
 
     eps = 1.0
+    # Calculate the decay rate to reach 0.01 at the last episode
+    epsilon_decay = (0.01 / eps) ** (1 / num_episodes) if num_episodes > 0 else 0
+
     ep_bar = tqdm(range(1, num_episodes + 1), desc="Episodes", unit="ep")
     for ep in ep_bar:
         s = env.reset()
@@ -107,7 +110,7 @@ def train_agent(with_ui=True, num_episodes=200, screen=None):
         if not with_ui:
             step_bar.close()
 
-        eps = max(0.01, eps * 0.995)
+        eps = max(0.01, eps * epsilon_decay)
         score = env.logic.score if with_ui else env.score
         ep_bar.set_postfix(score=f"{score:5d}", reward=f"{rsum:6.1f}", eps=f"{eps:.3f}")
 
@@ -200,7 +203,7 @@ def main_menu():
     if pygame is None:
         print("Pygame not found. Cannot display main menu. Starting headless training.")
         try:
-            train_agent(with_ui=False, num_episodes=1000)
+            train_agent(with_ui=False, num_episodes=NUM_EPISODES)
         except KeyboardInterrupt:
             print("\nHeadless training interrupted by user.")
         sys.exit()
@@ -214,7 +217,7 @@ def main_menu():
     buttons = {
         "Play Game (Keyboard)": (human_play, {}),
         "Learn with UI": (train_agent, {"with_ui": True}),
-        "Learn without UI": (train_agent, {"with_ui": False, "num_episodes": 200}),
+        "Learn without UI": (train_agent, {"with_ui": False, "num_episodes": NUM_EPISODES}),
         "Play using AI": (ai_play, {}),
     }
     button_rects = []

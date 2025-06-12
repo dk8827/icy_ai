@@ -17,8 +17,8 @@ BACKGROUND     = (135, 206, 235)
 PLAYER_COLOR   = (255,  0,   0)
 PLATFORM_COLOR = (100, 100, 100)
 BUTTON_COLOR   = (100, 100, 100)
-BUTTON_HOVER   = (150, 150, 150)
-TEXT_COLOR     = (255, 255, 255)
+BUTTON_HOVER   = (230, 230, 230)
+TEXT_COLOR     = (0, 0, 0)
 
 # Game logic constants
 # 3000 ms @ 60 FPS = 180 frames
@@ -26,7 +26,8 @@ COMBO_TIMEOUT_FRAMES = 180
 
 # AI constants
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-MODEL_PATH = "models/icy_tower_ddqn.pth"
+MODEL_PATH = "models/icy_tower_model.pth"
+NUM_EPISODES = 200
 
 Experience = namedtuple("Experience",
                         ("state", "action", "reward", "next_state", "done")) 
