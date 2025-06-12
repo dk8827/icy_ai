@@ -1,11 +1,19 @@
 # icy_tower_ddqn_exact.py
 # A minimal Icy-Tower clone with authentic scoring + DDQN agent scaffold
+# REFACTORED to separate game logic from the Pygame UI
 # ----------------------------------------------------------------------
-import pygame, torch, torch.nn as nn, torch.optim as optim
+import torch, torch.nn as nn, torch.optim as optim
 import torch.nn.functional as F
-import random, math, os
+import random, math, os, sys
 import numpy as np
 from collections import deque, namedtuple
+
+# Use a conditional import for pygame to ensure it's not a hard dependency
+try:
+    import pygame
+except ImportError:
+    print("Pygame not found. UI-based modes will be unavailable.")
+    pygame = None # Allow headless mode to run
 
 # ========= 0. CONFIG & CONSTANTS ======================================
 SCREEN_WIDTH,  SCREEN_HEIGHT = 400, 600
@@ -22,7 +30,9 @@ BUTTON_COLOR   = (100, 100, 100)
 BUTTON_HOVER   = (150, 150, 150)
 TEXT_COLOR     = (255, 255, 255)
 
-COMBO_TIMEOUT_MS = 3000      # 3 s between landings to keep a combo alive
+# Time is now measured in frames for the logic, not milliseconds
+# 3000 ms @ 60 FPS = 180 frames
+COMBO_TIMEOUT_FRAMES = 180
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 MODEL_PATH = "models/icy_tower_ddqn.pth"
@@ -30,171 +40,151 @@ MODEL_PATH = "models/icy_tower_ddqn.pth"
 Experience = namedtuple("Experience",
                         ("state", "action", "reward", "next_state", "done"))
 
-# ========= 1. GAME COMPONENTS =========================================
-class Player(pygame.sprite.Sprite):
+# ========= 1. PURE GAME LOGIC (NO PYGAME!) ============================
+# These are simple data classes, replacing pygame.sprite.Sprite
+class LogicPlayer:
     def __init__(self):
-        super().__init__()
-        self.image = pygame.Surface([PLAYER_W, PLAYER_H])
-        self.image.fill(PLAYER_COLOR)
-        self.rect = self.image.get_rect()
-        self.pos = pygame.math.Vector2(SCREEN_WIDTH/2, SCREEN_HEIGHT-50)
-        self.vel = pygame.math.Vector2(0, 0)
-        self.acc = pygame.math.Vector2(0, PLAYER_GRAV)
+        self.pos = [SCREEN_WIDTH / 2, SCREEN_HEIGHT - 50]
+        self.vel = [0, 0]
+        self.acc = [0, PLAYER_GRAV]
 
-    def move(self, action):                    # 0=L, 1=stay, 2=R
-        self.acc.x = 0
-        if action == 0: self.acc.x = -PLAYER_ACC
-        if action == 2: self.acc.x =  PLAYER_ACC
+    def get_rect(self): # Returns a simple (x, y, w, h) tuple
+        return (self.pos[0] - PLAYER_W/2, self.pos[1] - PLAYER_H, PLAYER_W, PLAYER_H)
 
-    def update(self):
-        self.acc.x += self.vel.x * PLAYER_FRICTION
-        self.vel += self.acc
-        self.pos += self.vel + 0.5 * self.acc
-
-        self.pos.x %= SCREEN_WIDTH            # wrap-around
-        self.rect.midbottom = self.pos
-
-    def jump(self): self.vel.y = PLAYER_JUMP
-
-class Platform(pygame.sprite.Sprite):
+class LogicPlatform:
     def __init__(self, x, y, width, floor_no):
-        super().__init__()
-        self.image = pygame.Surface([width, PLAT_H])
-        self.image.fill(PLATFORM_COLOR)
-        self.rect = self.image.get_rect(topleft=(x, y))
-        self.floor_no = floor_no               # crucial for scoring
+        self.x, self.y, self.width = x, y, width
+        self.floor_no = floor_no
 
-# ========= 2. GAME ENVIRONMENT ========================================
-class IcyTowerEnv:
+    def get_rect(self): # Returns a simple (x, y, w, h) tuple
+        return (self.x, self.y, self.width, PLAT_H)
+
+class IcyTowerLogic:
+    """
+    Manages the complete game state and rules without any graphics.
+    This class is the "model" in a Model-View-Controller architecture.
+    It can be run headlessly for fast training.
+    """
     def __init__(self):
-        pygame.init()
-        pygame.display.set_caption("Icy Tower DDQN")
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        self.clock  = pygame.time.Clock()
-        self.font   = pygame.font.SysFont(None, 30)
-
-        # dynamic action-space size (Gym-style)
         self.action_space_n = 3
+        self.state_size = 6 # px, vx, vy, dx, dy, dw
 
-    # ------------------------------------------------------------------
+    def _rects_collide(self, rect1, rect2):
+        # Simple Axis-Aligned Bounding Box collision check
+        x1, y1, w1, h1 = rect1
+        x2, y2, w2, h2 = rect2
+        return x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2
+
     def reset(self):
-        self.player = Player()
-
-        ground = Platform(0, SCREEN_HEIGHT-40, SCREEN_WIDTH, floor_no=0)
-        self.platforms = pygame.sprite.Group(ground)
-        self.all_sprites = pygame.sprite.Group(self.player, ground)
-
+        self.player = LogicPlayer()
+        self.platforms = [LogicPlatform(0, SCREEN_HEIGHT-40, SCREEN_WIDTH, 0)]
         self.next_floor_no = 1
-        self.platforms.add(self._generate_platforms(15,
-                         SCREEN_HEIGHT-100))
-        self.all_sprites.add(*self.platforms)
+        self.platforms.extend(self._generate_platforms(15, SCREEN_HEIGHT-100))
 
-        # scoring state -------------------------------------------------
-        self.current_floor  = 0
-        self.highest_floor  = 0
-        self.combo_floors   = 0
-        self.multi_jumps    = 0
-        self.combo_points   = 0
-        self.last_land_time = pygame.time.get_ticks()
-
-        self.score = 0
-        self.camera_y = 0
+        # Scoring & game state
+        self.current_floor, self.highest_floor = 0, 0
+        self.combo_floors, self.multi_jumps, self.combo_points = 0, 0, 0
+        self.last_land_frame = 0
+        self.total_frames = 0
+        self.score, self.camera_y = 0, 0
         self.done = False
         return self._get_state()
 
-    # ------------------------------------------------------------------
     def step(self, action):
         prev_score = self.score
+        self.total_frames += 1
 
         self._handle_player(action)
         landed = self._handle_collisions()
         self._scroll_camera()
         self._manage_platforms()
 
-        # combo timeout check
         if not landed and self.combo_floors and \
-           pygame.time.get_ticks() - self.last_land_time > COMBO_TIMEOUT_MS:
+           self.total_frames - self.last_land_frame > COMBO_TIMEOUT_FRAMES:
             self._finalize_combo()
 
         self._update_score()
         self._check_game_over()
-
         reward = self._calc_reward(prev_score, landed)
         return self._get_state(), reward, self.done, {}
 
-    # ------------------------------------------------------------------
-    def render(self):
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                self.done = True
-                return False
-        self.screen.fill(BACKGROUND)
-        self.all_sprites.draw(self.screen)
-        txt = self.font.render(f"SCORE {self.score}", True, (0,0,0))
-        self.screen.blit(txt, (10, 10))
-        pygame.display.flip()
-        self.clock.tick(60)
-        return True
-
-    # ======= helpers ===================================================
     def _handle_player(self, action):
-        self.player.move(action); self.player.update()
+        p = self.player
+        p.acc[0] = 0
+        if action == 0: p.acc[0] = -PLAYER_ACC  # Left
+        if action == 2: p.acc[0] = PLAYER_ACC   # Right
+
+        p.acc[0] += p.vel[0] * PLAYER_FRICTION
+        p.vel[0] += p.acc[0]
+        p.vel[1] += p.acc[1]
+        p.pos[0] += p.vel[0] + 0.5 * p.acc[0]
+        p.pos[1] += p.vel[1] + 0.5 * p.acc[1]
+        p.pos[0] %= SCREEN_WIDTH # wrap-around
 
     def _handle_collisions(self):
         landed = False
-        if self.player.vel.y > 0:   # falling
-            hits = pygame.sprite.spritecollide(self.player, self.platforms, False)
-            if hits:
-                plat = min(hits,
-                           key=lambda p: abs(self.player.rect.bottom - p.rect.top))
-                if self.player.rect.bottom < plat.rect.top + self.player.vel.y + 1:
-                    self.player.pos.y = plat.rect.top
-                    self.player.vel.y = 0
-                    self.player.jump()
+        player_rect = self.player.get_rect()
+        if self.player.vel[1] > 0: # Falling
+            for plat in self.platforms:
+                plat_rect = plat.get_rect()
+                # A more precise collision check for landing
+                if self._rects_collide(player_rect, plat_rect) and \
+                   player_rect[1] + player_rect[3] < plat_rect[1] + self.player.vel[1] + 1:
+                    self.player.pos[1] = plat_rect[1]
+                    self.player.vel[1] = 0
+                    self.player.vel[1] = PLAYER_JUMP # Jump
                     self._on_land(plat)
                     landed = True
+                    break # Land on one platform at a time
         return landed
 
     def _on_land(self, plat):
         diff = plat.floor_no - self.current_floor
-        now  = pygame.time.get_ticks()
-
-        if diff >= 2:                       # multi-floor jump
+        if diff >= 2: # Multi-floor jump
             self.combo_floors += diff
-            self.multi_jumps  += 1
-        else:                               # normal or downward landing
+            self.multi_jumps += 1
+        else:
             self._finalize_combo()
-
-        self.current_floor  = plat.floor_no
-        self.highest_floor  = max(self.highest_floor, self.current_floor)
-        self.last_land_time = now
+        self.current_floor = plat.floor_no
+        self.highest_floor = max(self.highest_floor, self.current_floor)
+        self.last_land_frame = self.total_frames
 
     def _finalize_combo(self):
         if self.multi_jumps >= 2 and self.combo_floors >= 4:
             self.combo_points += self.combo_floors ** 2
-        self.combo_floors = 0;  self.multi_jumps = 0
+        self.combo_floors, self.multi_jumps = 0, 0
 
     def _scroll_camera(self):
-        if self.player.rect.top <= SCREEN_HEIGHT/4 and self.player.vel.y < 0:
-            dy = -self.player.vel.y
-            self.player.pos.y += dy
-            self.camera_y += dy
-            for p in self.platforms: p.rect.y += dy
+        player_y_on_screen = self.player.pos[1] - self.camera_y
+        if player_y_on_screen < SCREEN_HEIGHT / 3:
+            # Scroll up to keep the player in the bottom third of the screen
+            self.camera_y = self.player.pos[1] - SCREEN_HEIGHT / 3
+
 
     def _manage_platforms(self):
-        for p in self.platforms.copy():
-            if p.rect.top > SCREEN_HEIGHT: p.kill()
+        self.platforms = [p for p in self.platforms if p.y - self.camera_y < SCREEN_HEIGHT]
         if len(self.platforms) < 15:
-            top = min(self.platforms, key=lambda p: p.rect.y).rect.y
-            new = self._generate_platforms(5, top)
-            self.platforms.add(new); self.all_sprites.add(*new)
+            top_y = min(p.y for p in self.platforms)
+            new_platforms = self._generate_platforms(5, top_y)
+            self.platforms.extend(new_platforms)
+
+    def _generate_platforms(self, n, y_start):
+        plats = []
+        for i in range(n):
+            w = random.randint(PLAT_MIN_W, PLAT_MAX_W)
+            x = random.randint(0, SCREEN_WIDTH - w)
+            y = y_start - i * PLAT_SPACING - random.randint(0, 20) # Add some variance
+            plats.append(LogicPlatform(x, y, w, self.next_floor_no))
+            self.next_floor_no += 1
+        return plats
 
     def _update_score(self):
-        self.score = 10*self.highest_floor + self.combo_points
+        self.score = 10 * self.highest_floor + self.combo_points
 
     def _check_game_over(self):
-        if self.player.rect.top > SCREEN_HEIGHT:
-            self.done = True         # unfinished combo is void
+        player_screen_y = self.player.pos[1] - self.camera_y
+        if player_screen_y > SCREEN_HEIGHT:
+            self.done = True
 
     def _calc_reward(self, prev_score, landed):
         if self.done: return -10
@@ -202,36 +192,145 @@ class IcyTowerEnv:
         if landed: reward += 1
         return reward
 
-    def _generate_platforms(self, n, y_start):
-        group = pygame.sprite.Group()
-        for i in range(n):
-            w = random.randint(PLAT_MIN_W, PLAT_MAX_W)
-            x = random.randint(0, SCREEN_WIDTH-w)
-            y = y_start - i*PLAT_SPACING
-            group.add(Platform(x, y, w, self.next_floor_no))
-            self.next_floor_no += 1
-        return group
-
-    # --------------- state vector (simple) ----------------------------
     def _get_state(self):
-        px = (self.player.pos.x - SCREEN_WIDTH/2)/(SCREEN_WIDTH/2)
-        vx = np.clip(self.player.vel.x/(PLAYER_ACC*5), -1, 1)
-        vy = np.clip(self.player.vel.y/abs(PLAYER_JUMP), -1, 1)
-
-        # nearest platform above
-        above = [p for p in self.platforms if p.rect.bottom < self.player.rect.top]
+        px = (self.player.pos[0] - SCREEN_WIDTH/2) / (SCREEN_WIDTH/2)
+        vx = np.clip(self.player.vel[0] / (PLAYER_ACC*5), -1, 1)
+        vy = np.clip(self.player.vel[1] / abs(PLAYER_JUMP), -1, 1)
+        
+        player_rect = self.player.get_rect()
+        above = [p for p in self.platforms if p.get_rect()[1] + PLAT_H < player_rect[1]]
         if above:
-            tgt = min(above, key=lambda p: self.player.rect.top - p.rect.bottom)
-            dx  = (tgt.rect.centerx - self.player.pos.x)/SCREEN_WIDTH
-            dy  = (tgt.rect.centery - self.player.pos.y)/SCREEN_HEIGHT
-            dw  = (tgt.rect.width - PLAT_MIN_W)/(PLAT_MAX_W - PLAT_MIN_W)
+            tgt = min(above, key=lambda p: player_rect[1] - (p.get_rect()[1] + PLAT_H))
+            tgt_rect = tgt.get_rect()
+            dx = (tgt_rect[0] + tgt_rect[2]/2 - self.player.pos[0]) / SCREEN_WIDTH
+            dy = (tgt_rect[1] + tgt_rect[3]/2 - self.player.pos[1]) / SCREEN_HEIGHT
+            dw = (tgt_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
         else:
             dx, dy, dw = 0, 1, 0
         return np.array([px, vx, vy, dx, dy, dw], dtype=np.float32)
 
+    # Dummy methods to match the UI env interface for easy swapping
+    def render(self): return True
+    def close(self): pass
+
+
+# ========= 2. PYGAME ENVIRONMENT (UI) =================================
+# These are Pygame-specific sprite classes
+class PlayerSprite(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.image = pygame.Surface([PLAYER_W, PLAYER_H])
+        self.image.fill(PLAYER_COLOR)
+        self.rect = self.image.get_rect()
+
+class PlatformSprite(pygame.sprite.Sprite):
+    def __init__(self, platform_logic):
+        super().__init__()
+        self.logic_ref = platform_logic
+        w, h = platform_logic.width, PLAT_H
+        self.image = pygame.Surface([w, h])
+        self.image.fill(PLATFORM_COLOR)
+        self.rect = self.image.get_rect(topleft=(platform_logic.x, platform_logic.y))
+
+class IcyTowerPygameEnv:
+    """
+    Manages the Pygame rendering and user input (the "view").
+    It holds a reference to an IcyTowerLogic instance.
+    """
+    def __init__(self):
+        if pygame is None:
+            raise ImportError("Pygame is required for UI-based modes.")
+        pygame.init()
+        pygame.display.set_caption("Icy Tower DDQN")
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 30)
+
+        self.logic = IcyTowerLogic()
+        self.action_space_n = self.logic.action_space_n
+        self.state_size = self.logic.state_size
+
+        self.player_sprite = PlayerSprite()
+        self.platform_sprites = pygame.sprite.Group()
+        self.all_sprites = pygame.sprite.Group(self.player_sprite)
+
+    def reset(self):
+        state = self.logic.reset()
+        self._sync_sprites()
+        return state
+
+    def step(self, action):
+        state, reward, done, info = self.logic.step(action)
+        if done:
+            # Don't immediately close, allow one last render to show final state
+            pass
+        return state, reward, done, info
+
+    def _sync_sprites(self):
+        """Re-create sprites from the logic state. Simple and robust."""
+        # This can be slow; a more optimized version would update existing sprites.
+        # But for this game, it's perfectly fine and bug-resistant.
+        self.platform_sprites.empty()
+        self.all_sprites.empty()
+        self.all_sprites.add(self.player_sprite)
+
+        # Create new sprites for all current platforms in the logic
+        for p_logic in self.logic.platforms:
+            p_sprite = PlatformSprite(p_logic)
+            self.platform_sprites.add(p_sprite)
+            self.all_sprites.add(p_sprite)
+
+    def render(self):
+        # ==================================================================
+        # THIS IS THE CORRECTED RENDER METHOD
+        # ==================================================================
+        if pygame is None: return False
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                self.close()
+                return False
+
+        # --- STAGE 1: Sync all Pygame sprites with the current logic state ---
+        # Update player sprite's position to its absolute world coordinate.
+        self.player_sprite.rect.midbottom = self.logic.player.pos
+
+        # If the number of platforms has changed, recreate the platform sprites.
+        # This is a simple way to ensure the view matches the model.
+        if len(self.platform_sprites) != len(self.logic.platforms):
+             self._sync_sprites()
+
+        # --- STAGE 2: Apply the camera offset to all sprites for drawing ---
+        # This temporarily moves their rects to the correct screen position.
+        # It's done every frame and then reverted.
+        for sprite in self.all_sprites:
+            # We move the sprite DOWN by the camera's Y value.
+            # This creates the illusion of the camera moving UP.
+            sprite.rect.y -= self.logic.camera_y
+
+        # --- STAGE 3: Draw the scene ---
+        self.screen.fill(BACKGROUND)
+        self.all_sprites.draw(self.screen)
+        txt = self.font.render(f"SCORE {self.logic.score}", True, (0,0,0))
+        self.screen.blit(txt, (10, 10))
+        pygame.display.flip()
+
+        # --- STAGE 4: Revert the camera offset ---
+        # This resets the sprites' rects back to their absolute world coordinates
+        # so they are correct for the next frame's calculations. THIS IS THE KEY FIX.
+        for sprite in self.all_sprites:
+            sprite.rect.y += self.logic.camera_y
+
+        self.clock.tick(60)
+        return True
+
+
+    def close(self):
+        if pygame:
+            pygame.quit()
+
+
 # ========= 3.  (Minimal) Agent & Training scaffold ====================
-# You can plug your existing DDQN classes here; only environment changed.
-# ----------------------------------------------------------------------
+# This section is unchanged as it only interacts with the env interface
 class QNetwork(nn.Module):
     def __init__(self, s, a):
         super().__init__()
@@ -285,7 +384,6 @@ class DDQNAgent:
         loss   = F.mse_loss(Q_exp, Q_tar)
 
         self.opt.zero_grad(); loss.backward(); self.opt.step()
-        # soft update
         for tp, lp in zip(self.tgt.parameters(), self.net.parameters()):
             tp.data.copy_(0.995*tp.data + 0.005*lp.data)
 
@@ -299,23 +397,37 @@ class DDQNAgent:
 
 # ========= 4. GAME MODES & MENU ========================================
 def human_play():
-    env = IcyTowerEnv()
+    env = IcyTowerPygameEnv()
     s = env.reset()
-    while True:
-        action = 1 # Stay still
+    done = False
+    
+    # We need to manage the game loop slightly differently for human play
+    # because we want to see the "Game Over" state.
+    running = True
+    while running:
+        action = 1 # Stay still by default
+        if pygame is None: break
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:  action = 0
         if keys[pygame.K_RIGHT]: action = 2
+        
+        # Only step the game logic if it's not done
+        if not done:
+            s2, r, done, _ = env.step(action)
+            s = s2
+            
+        # Always render, and check for quit events
+        if not env.render(): 
+            running = False # Exit if render returns False (e.g., window closed)
+            
+    env.close()
 
-        s2, r, d, _ = env.step(action)
-        s = s2
-        if not env.render(): return
-        if d: break
 
 def train_agent(with_ui=True, num_episodes=200):
-    env = IcyTowerEnv()
-    state_size = len(env.reset())
-    agent = DDQNAgent(state_size, env.action_space_n)
+    # *** KEY CHANGE: Instantiate the correct environment ***
+    env = IcyTowerPygameEnv() if with_ui else IcyTowerLogic()
+    
+    agent = DDQNAgent(env.state_size, env.action_space_n)
     if os.path.exists(MODEL_PATH):
         print(f"Loading model from {MODEL_PATH} to continue training.")
         agent.load(MODEL_PATH)
@@ -324,44 +436,52 @@ def train_agent(with_ui=True, num_episodes=200):
     for ep in range(1, num_episodes + 1):
         s = env.reset()
         rsum = 0
-        while True:
+        done = False
+        while not done:
             a = agent.act(s, eps)
-            s2, r, d, _ = env.step(a)
-            agent.step(s, a, r, s2, d)
+            s2, r, done, _ = env.step(a)
+            agent.step(s, a, r, s2, done)
             s = s2
             rsum += r
-            if with_ui and not env.render():
+            if with_ui and not env.render(): # Render call also handles quit event
                 agent.save(MODEL_PATH)
                 print(f"\nTraining stopped. Model saved to {MODEL_PATH}")
+                env.close()
                 return
-            if d:
-                break
+
         eps = max(0.01, eps*0.995)
-        print(f"Ep {ep:3d} | score {env.score:5d} | ep-reward {rsum:6.1f} | ε {eps:.3f}", end='\r')
-        if ep % 10 == 0: print() # Newline every 10 eps
+        # For headless, env.logic.score is the same as env.score
+        score = env.logic.score if with_ui else env.score
+        print(f"Ep {ep:3d} | score {score:5d} | ep-reward {rsum:6.1f} | ε {eps:.3f}", end='\r')
+        if ep % 10 == 0 or ep == num_episodes: print() # Newline
 
     agent.save(MODEL_PATH)
     print(f"\nFinished training {num_episodes} episodes. Model saved to {MODEL_PATH}")
+    env.close()
 
 def ai_play():
     if not os.path.exists(MODEL_PATH):
         print(f"No model found at {MODEL_PATH}. Please train the AI first.")
-        # Small wait to let user read the message before menu redraws
-        pygame.time.wait(2000)
+        if pygame: pygame.time.wait(2000)
         return
 
-    env = IcyTowerEnv()
-    state_size = len(env.reset())
-    agent = DDQNAgent(state_size, env.action_space_n)
+    env = IcyTowerPygameEnv()
+    agent = DDQNAgent(env.state_size, env.action_space_n)
     agent.load(MODEL_PATH)
 
     s = env.reset()
-    while True:
+    done = False
+    running = True
+    while running:
         a = agent.act(s, eps=0.0) # Epsilon = 0 for deterministic play
-        s2, r, d, _ = env.step(a)
-        s = s2
-        if not env.render(): return
-        if d: break
+        if not done:
+            s2, r, done, _ = env.step(a)
+            s = s2
+        
+        if not env.render(): 
+            running = False
+            
+    env.close()
 
 def draw_button(screen, rect, text, font, is_hovered):
     color = BUTTON_HOVER if is_hovered else BUTTON_COLOR
@@ -371,6 +491,14 @@ def draw_button(screen, rect, text, font, is_hovered):
     screen.blit(text_surf, text_rect)
 
 def main_menu():
+    if pygame is None:
+        print("Pygame not found. Cannot display main menu. Starting headless training.")
+        try:
+            train_agent(with_ui=False, num_episodes=1000)
+        except KeyboardInterrupt:
+            print("\nHeadless training interrupted by user.")
+        sys.exit()
+        
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Icy Tower - Main Menu")
@@ -407,21 +535,19 @@ def main_menu():
                         key = list(buttons.keys())[i]
                         func, arg = buttons[key]
                         
-                        pygame.display.set_caption("Icy Tower DDQN") # Reset caption
+                        pygame.quit() # Quit the menu loop's pygame instance
                         if arg is not None:
-                            if not arg: # Headless learning
-                                print(f"Starting: {key}. Check console for progress.")
-                                func(with_ui=arg)
-                                print("Finished headless training. Returning to menu.")
-                            else: # Learning with UI
-                                func(with_ui=arg)
-                        else: # Human or AI play
+                            func(with_ui=arg)
+                        else:
                             func()
+                        
+                        # Re-initialize for the menu after the game mode finishes
+                        pygame.init()
+                        screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
                         pygame.display.set_caption("Icy Tower - Main Menu")
 
         pygame.display.flip()
         clock.tick(30)
-
     pygame.quit()
 
 # ========= 5. MAIN ====================================================
