@@ -3,7 +3,9 @@ import numpy as np
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, PLAYER_W, PLAYER_H, PLAYER_GRAV,
     PLAYER_ACC, PLAYER_FRICTION, PLAYER_JUMP, PLAT_MIN_W, PLAT_MAX_W,
-    PLAT_H, PLAT_SPACING, COMBO_TIMEOUT_FRAMES
+    PLAT_H, PLAT_SPACING, COMBO_TIMEOUT_FRAMES, BASE_SCROLL_SPEED,
+    SCROLL_ACCELERATION, SPEED_UP_INTERVAL_SECONDS, MAX_SPEED_UPS,
+    HURRY_UP_FLASH_DURATION_FRAMES
 )
 
 # These are simple data classes, replacing pygame.sprite.Sprite
@@ -59,9 +61,21 @@ class IcyTowerLogic:
         self.total_frames = 0
         self.score, self.camera_y = 0, 0
         self.done = False
+
+        # New scrolling mechanics
+        self.scrolling = False
+        self.scroll_speed = 0
+        self.last_speed_up_time = 0
+        self.speed_ups = 0
+        self.hurry_up_flash_frames = 0
+        self.speed_up_interval_frames = SPEED_UP_INTERVAL_SECONDS * 60  # Assuming 60 FPS
+
         return self._get_state()
 
     def step(self, action):
+        if self.hurry_up_flash_frames > 0:
+            self.hurry_up_flash_frames -= 1
+
         prev_score = self.score
         self.total_frames += 1
 
@@ -133,10 +147,32 @@ class IcyTowerLogic:
         self.combo_floors, self.multi_jumps = 0, 0
 
     def _scroll_camera(self):
+        # Determine if scrolling should start
+        if not self.scrolling and self.highest_floor >= 5:
+            self.scrolling = True
+            self.scroll_speed = BASE_SCROLL_SPEED
+            self.last_speed_up_time = self.total_frames
+
+        # If scrolling is active, apply the base scroll and check for speed-ups
+        if self.scrolling:
+            if self.speed_ups < MAX_SPEED_UPS and \
+               (self.total_frames - self.last_speed_up_time) > self.speed_up_interval_frames:
+                self.scroll_speed += SCROLL_ACCELERATION
+                self.speed_ups += 1
+                self.last_speed_up_time = self.total_frames
+                self.hurry_up_flash_frames = HURRY_UP_FLASH_DURATION_FRAMES
+            
+            # Move camera up by the scroll speed. (Subtract from y because y increases downwards)
+            self.camera_y -= self.scroll_speed
+
+        # Also, ensure the camera keeps the player in view if they are climbing fast
         player_y_on_screen = self.player.pos[1] - self.camera_y
         if player_y_on_screen < SCREEN_HEIGHT / 3:
-            # Scroll up to keep the player in the bottom third of the screen
-            self.camera_y = self.player.pos[1] - SCREEN_HEIGHT / 3
+            # This calculation ensures the camera moves higher (lower y value) to catch up with the player
+            target_camera_y = self.player.pos[1] - SCREEN_HEIGHT / 3
+            # Only adjust if it means moving the camera up further than the base scroll already has
+            if target_camera_y < self.camera_y:
+                self.camera_y = target_camera_y
 
 
     def _manage_platforms(self):

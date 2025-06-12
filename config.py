@@ -23,6 +23,11 @@ TEXT_COLOR     = (0, 0, 0)
 # Game logic constants
 # 3000 ms @ 60 FPS = 180 frames
 COMBO_TIMEOUT_FRAMES = 180
+BASE_SCROLL_SPEED = 0.8
+SCROLL_ACCELERATION = 0.25
+SPEED_UP_INTERVAL_SECONDS = 30
+MAX_SPEED_UPS = 5
+HURRY_UP_FLASH_DURATION_FRAMES = 120  # 2 seconds at 60 FPS
 
 # AI constants
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

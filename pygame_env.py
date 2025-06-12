@@ -92,6 +92,15 @@ class IcyTowerPygameEnv:
         self.all_sprites.draw(self.screen)
         txt = self.font.render(f"SCORE {self.logic.score}", True, (0,0,0))
         self.screen.blit(txt, (10, 10))
+
+        if self.logic.hurry_up_flash_frames > 0:
+            # Flashes by drawing only on some frames
+            if (self.logic.total_frames // 10) % 2 == 0:
+                hurry_font = pygame.font.SysFont(None, 50)
+                hurry_text = hurry_font.render("Hurry Up!", True, (255, 0, 0))
+                text_rect = hurry_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+                self.screen.blit(hurry_text, text_rect)
+
         pygame.display.flip()
 
         for sprite in self.all_sprites:

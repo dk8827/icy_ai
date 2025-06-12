@@ -178,6 +178,13 @@ def ai_play(screen):
         score_text = env.font.render(f"SCORE {env.logic.score}", True, (0,0,0))
         screen.blit(score_text, (10, 10))
 
+        if env.logic.hurry_up_flash_frames > 0:
+            if (env.logic.total_frames // 10) % 2 == 0:
+                hurry_font = pygame.font.SysFont(None, 50)
+                hurry_text = hurry_font.render("Hurry Up!", True, (255, 0, 0))
+                text_rect = hurry_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+                screen.blit(hurry_text, text_rect)
+
         is_hovered = main_menu_button_rect.collidepoint(mouse_pos)
         draw_button(screen, main_menu_button_rect, "Main Menu", button_font, is_hovered)
 
