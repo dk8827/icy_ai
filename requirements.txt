@@ -2,3 +2,4 @@ pygame
 torch
 numpy
 tqdm 
+matplotlib 

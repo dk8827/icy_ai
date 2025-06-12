@@ -206,8 +206,8 @@ class IcyTowerLogic:
     def _manage_platforms(self):
         self.platforms = [p for p in self.platforms if p.y - self.camera_y < SCREEN_HEIGHT]
         if len(self.platforms) < 15:
-            top_y = min(p.y for p in self.platforms)
-            new_platforms = self._generate_platforms(5, top_y)
+            top_y = min(p.y for p in self.platforms) if self.platforms else SCREEN_HEIGHT
+            new_platforms = self._generate_platforms(5, top_y - PLAT_SPACING)
             self.platforms.extend(new_platforms)
 
     def _generate_platforms(self, num_platforms, y_start):

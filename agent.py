@@ -48,6 +48,7 @@ class DDQNAgent:
         self.optimizer = optim.Adam(self.q_network_local.parameters(), lr=LR)
         self.memory = ReplayBuffer(BUFFER_SIZE, BATCH_SIZE)
         self.time_step = 0
+        self.last_loss = 0.0
 
     def act(self, state, eps):
         if random.random() < eps: return random.randrange(self.num_actions)
@@ -60,7 +61,10 @@ class DDQNAgent:
         self.memory.add(state, action, reward, next_state, done)
         self.time_step = (self.time_step + 1) % UPDATE_EVERY
         if self.time_step == 0 and len(self.memory) >= BATCH_SIZE:
-            self.learn()
+            loss = self.learn()
+            self.last_loss = loss
+        
+        return self.last_loss
 
     def learn(self):
         batch = self.memory.sample()
@@ -86,6 +90,8 @@ class DDQNAgent:
         # ------------------- update target network ------------------- #
         for target_param, local_param in zip(self.q_network_target.parameters(), self.q_network_local.parameters()):
             target_param.data.copy_(TAU * local_param.data + (1.0 - TAU) * target_param.data)
+
+        return loss.item()
 
     def save(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)

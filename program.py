@@ -1,12 +1,16 @@
 import os
 import sys
+import datetime
+import numpy as np
 
 try:
     import pygame
     from tqdm import tqdm
+    import matplotlib.pyplot as plt
 except ImportError:
-    print("Pygame or tqdm not found. UI-based modes will be unavailable.")
+    print("Pygame, tqdm or matplotlib not found. UI-based modes will be unavailable.")
     pygame = None
+    plt = None
 import math
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND, BUTTON_COLOR,
@@ -59,6 +63,15 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
     else:
         env = IcyTowerLogic()
 
+    start_time = datetime.datetime.now()
+    start_time_str = start_time.strftime("%Y-%m-%d_%H-%M-%S")
+    
+    episode_history = []
+    score_history = []
+    max_score_history = []
+    loss_history = []
+    epsilon_history = []
+
     agent = DDQNAgent(env.state_size, env.action_space_n)
     if os.path.exists(MODEL_PATH):
         print(f"Attempting to load model from {MODEL_PATH} to continue training.")
@@ -80,6 +93,7 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
         state = env.reset()
         reward_sum = 0
         done = False
+        episode_losses = []
 
         last_score = 0
         steps_since_score_increase = 0
@@ -92,6 +106,10 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
             action = agent.act(state, eps)
             next_state, reward, done, _ = env.step(action)
 
+            loss = agent.step(state, action, reward, next_state, done)
+            if loss > 0:
+                episode_losses.append(loss)
+
             if not done:
                 current_score = env.logic.score if with_ui else env.score
                 if current_score > last_score:
@@ -103,7 +121,6 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
                 if steps_since_score_increase >= max_steps_without_progress:
                     done = True
 
-            agent.step(state, action, reward, next_state, done)
             state = next_state
             reward_sum += reward
 
@@ -124,11 +141,80 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
         eps = max(0.01, eps * epsilon_decay)
         score = env.logic.score if with_ui else env.score
         max_score_ever = max(max_score_ever, score)
+
+        episode_history.append(episode)
+        score_history.append(score)
+        max_score_history.append(max_score_ever)
+        avg_loss = np.mean(episode_losses) if episode_losses else 0
+        loss_history.append(avg_loss)
+        epsilon_history.append(eps)
+
+        if episode > 0 and episode % 5 == 0:
+            save_progress_charts(
+                episode_history,
+                score_history,
+                max_score_history,
+                loss_history,
+                epsilon_history,
+                start_time_str
+            )
+        
         ep_bar.set_postfix(score=f"{score:5d}", max_score=f"{max_score_ever:5d}", reward=f"{reward_sum:6.1f}", eps=f"{eps:.3f}")
 
+    save_progress_charts(
+        episode_history,
+        score_history,
+        max_score_history,
+        loss_history,
+        epsilon_history,
+        start_time_str
+    )
     agent.save(MODEL_PATH)
     print(f"\nFinished training {num_episodes} episodes. Model saved to {MODEL_PATH}")
     env.close()
+
+
+def save_progress_charts(episodes, scores, max_scores, losses, epsilons, start_time_str):
+    if plt is None:
+        return
+
+    charts_dir = "charts"
+    if not os.path.exists(charts_dir):
+        os.makedirs(charts_dir)
+    
+    filename = f"{charts_dir}/learning_progress_{start_time_str}.png"
+
+    fig, axs = plt.subplots(3, 1, figsize=(12, 18))
+    fig.suptitle(f'Training Progress - {start_time_str}', fontsize=16)
+
+    # Scores
+    axs[0].plot(episodes, scores, label='Score per Episode')
+    axs[0].plot(episodes, max_scores, label='Max Score History', linestyle='--')
+    axs[0].set_title('Scores over Episodes')
+    axs[0].set_xlabel('Episode')
+    axs[0].set_ylabel('Score')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Losses
+    axs[1].plot(episodes, losses, color='orange', label='Average NN Loss per Episode')
+    axs[1].set_title('NN Loss over Episodes')
+    axs[1].set_xlabel('Episode')
+    axs[1].set_ylabel('Loss')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Epsilon
+    axs[2].plot(episodes, epsilons, color='green', label='Epsilon (NN Noise)')
+    axs[2].set_title('Epsilon Decay (Exploration vs. Exploitation)')
+    axs[2].set_xlabel('Episode')
+    axs[2].set_ylabel('Epsilon Value')
+    axs[2].legend()
+    axs[2].grid(True)
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(filename)
+    plt.close(fig)
 
 
 def ai_play(screen):
