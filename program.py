@@ -76,9 +76,9 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
 
     max_score_ever = 0
     ep_bar = tqdm(range(1, num_episodes + 1), desc="Episodes", unit="ep")
-    for ep in ep_bar:
-        s = env.reset()
-        rsum = 0
+    for episode in ep_bar:
+        state = env.reset()
+        reward_sum = 0
         done = False
 
         last_score = 0
@@ -86,11 +86,11 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
         max_steps_without_progress = 1000
 
         if not with_ui:
-            step_bar = tqdm(desc=f"Ep {ep}", unit="step", leave=False)
+            step_bar = tqdm(desc=f"Ep {episode}", unit="step", leave=False)
         
         while not done:
-            a = agent.act(s, eps)
-            s2, r, done, _ = env.step(a)
+            action = agent.act(state, eps)
+            next_state, reward, done, _ = env.step(action)
 
             if not done:
                 current_score = env.logic.score if with_ui else env.score
@@ -103,9 +103,9 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
                 if steps_since_score_increase >= max_steps_without_progress:
                     done = True
 
-            agent.step(s, a, r, s2, done)
-            s = s2
-            rsum += r
+            agent.step(state, action, reward, next_state, done)
+            state = next_state
+            reward_sum += reward
 
             if not with_ui:
                 step_bar.update(1)
@@ -124,7 +124,7 @@ def train_agent(with_ui=True, num_episodes=NUM_EPISODES, screen=None):
         eps = max(0.01, eps * epsilon_decay)
         score = env.logic.score if with_ui else env.score
         max_score_ever = max(max_score_ever, score)
-        ep_bar.set_postfix(score=f"{score:5d}", max_score=f"{max_score_ever:5d}", reward=f"{rsum:6.1f}", eps=f"{eps:.3f}")
+        ep_bar.set_postfix(score=f"{score:5d}", max_score=f"{max_score_ever:5d}", reward=f"{reward_sum:6.1f}", eps=f"{eps:.3f}")
 
     agent.save(MODEL_PATH)
     print(f"\nFinished training {num_episodes} episodes. Model saved to {MODEL_PATH}")
@@ -145,7 +145,7 @@ def ai_play(screen):
     main_menu_button_rect = pygame.Rect(SCREEN_WIDTH - 160, 10, 150, 40)
     button_font = pygame.font.SysFont(None, 30)
 
-    s = env.reset()
+    state = env.reset()
     done = False
     running = True
     game_over_time = None
@@ -167,14 +167,14 @@ def ai_play(screen):
                 game_over_time = pygame.time.get_ticks()
             
             if pygame.time.get_ticks() - game_over_time > 1000:
-                s = env.reset()
+                state = env.reset()
                 done = False
                 game_over_time = None
         
         if not done:
-            a = agent.act(s, eps=0.0)
-            s2, r, done, _ = env.step(a)
-            s = s2
+            action = agent.act(state, eps=0.0)
+            next_state, reward, done, _ = env.step(action)
+            state = next_state
 
         env.player_sprite.rect.midbottom = env.logic.player.pos
 
@@ -263,9 +263,9 @@ def main_menu():
                         key = list(buttons.keys())[i]
                         func, kwargs = buttons[key]
 
-                        is_ui_action = not ("with_ui" in kwargs and not kwargs["with_ui"])
+                        is_headless = "with_ui" in kwargs and not kwargs["with_ui"]
 
-                        if is_ui_action:
+                        if not is_headless:
                             kwargs["screen"] = screen
                             func(**kwargs)
                             # Redraw menu by continuing the loop

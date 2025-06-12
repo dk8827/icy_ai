@@ -76,8 +76,8 @@ class IcyTowerPygameEnv:
 
     def render(self):
         if pygame is None: return False
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
                 return False
 
         self.player_sprite.rect.midbottom = self.logic.player.pos
@@ -90,8 +90,8 @@ class IcyTowerPygameEnv:
 
         self.screen.fill(BACKGROUND)
         self.all_sprites.draw(self.screen)
-        txt = self.font.render(f"SCORE {self.logic.score}", True, (0,0,0))
-        self.screen.blit(txt, (10, 10))
+        score_text_surface = self.font.render(f"SCORE {self.logic.score}", True, (0,0,0))
+        self.screen.blit(score_text_surface, (10, 10))
 
         if self.logic.hurry_up_flash_frames > 0:
             # Flashes by drawing only on some frames

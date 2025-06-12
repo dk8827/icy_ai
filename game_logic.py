@@ -97,14 +97,14 @@ class IcyTowerLogic:
         return self._get_state(), reward, self.done, {}
 
     def _handle_player(self, action):
-        p = self.player
-        p.acc[0] = 0
+        player = self.player
+        player.acc[0] = 0
 
         if self.on_ground:
             # Check if we have walked off the current platform
             if self.current_platform:
                 plat_rect = self.current_platform.get_rect()
-                player_rect = p.get_rect()
+                player_rect = player.get_rect()
                 player_left, _, player_w, _ = player_rect
                 player_right = player_left + player_w
                 plat_left, _, plat_w, _ = plat_rect
@@ -116,29 +116,29 @@ class IcyTowerLogic:
         # Actions: 0:l, 1:r, 2:s, 3:l+j, 4:r+j, 5:s+j
         move_action = action % 3  # 0: left, 1: right, 2: stay
         if move_action == 0:
-            p.acc[0] = -PLAYER_ACC  # Left
+            player.acc[0] = -PLAYER_ACC  # Left
         elif move_action == 1:
-            p.acc[0] = PLAYER_ACC   # Right
+            player.acc[0] = PLAYER_ACC   # Right
 
         # Jumping
         is_jump_action = action >= 3
         if is_jump_action and self.on_ground:
-            p.vel[1] = PLAYER_JUMP
+            player.vel[1] = PLAYER_JUMP
             self.on_ground = False
 
-        p.acc[0] += p.vel[0] * PLAYER_FRICTION
-        p.vel[0] += p.acc[0]
-        p.vel[1] += p.acc[1]
-        p.pos[0] += p.vel[0] + 0.5 * p.acc[0]
-        p.pos[1] += p.vel[1] + 0.5 * p.acc[1]
+        player.acc[0] += player.vel[0] * PLAYER_FRICTION
+        player.vel[0] += player.acc[0]
+        player.vel[1] += player.acc[1]
+        player.pos[0] += player.vel[0] + 0.5 * player.acc[0]
+        player.pos[1] += player.vel[1] + 0.5 * player.acc[1]
         
         # Wall collisions
-        if p.pos[0] < PLAYER_W / 2:
-            p.pos[0] = PLAYER_W / 2
-            p.vel[0] = 0
-        elif p.pos[0] > SCREEN_WIDTH - PLAYER_W / 2:
-            p.pos[0] = SCREEN_WIDTH - PLAYER_W / 2
-            p.vel[0] = 0
+        if player.pos[0] < PLAYER_W / 2:
+            player.pos[0] = PLAYER_W / 2
+            player.vel[0] = 0
+        elif player.pos[0] > SCREEN_WIDTH - PLAYER_W / 2:
+            player.pos[0] = SCREEN_WIDTH - PLAYER_W / 2
+            player.vel[0] = 0
 
     def _handle_collisions(self):
         landed = False
@@ -210,9 +210,9 @@ class IcyTowerLogic:
             new_platforms = self._generate_platforms(5, top_y)
             self.platforms.extend(new_platforms)
 
-    def _generate_platforms(self, n, y_start):
+    def _generate_platforms(self, num_platforms, y_start):
         plats = []
-        for i in range(n):
+        for i in range(num_platforms):
             base_width = PLAT_MAX_W - (self.next_floor_no * PLAT_W_DECAY_RATE)
             random_offset = random.uniform(-PLAT_W_RANDOMNESS, PLAT_W_RANDOMNESS)
             w = max(PLAT_MIN_W, base_width + random_offset)
@@ -241,21 +241,21 @@ class IcyTowerLogic:
 
     def _get_state(self):
         # Player state
-        p_pos = self.player.pos
-        p_vel = self.player.vel
-        px = (p_pos[0] - SCREEN_WIDTH/2) / (SCREEN_WIDTH/2)
-        vx = np.clip(p_vel[0] / (PLAYER_ACC*5), -1, 1)
-        vy = np.clip(p_vel[1] / abs(PLAYER_JUMP), -1, 1)
-        player_state = [px, vx, vy]
+        player_pos = self.player.pos
+        player_vel = self.player.vel
+        norm_player_x = (player_pos[0] - SCREEN_WIDTH/2) / (SCREEN_WIDTH/2)
+        norm_player_vx = np.clip(player_vel[0] / (PLAYER_ACC*5), -1, 1)
+        norm_player_vy = np.clip(player_vel[1] / abs(PLAYER_JUMP), -1, 1)
+        player_state = [norm_player_x, norm_player_vx, norm_player_vy]
 
         # Current platform state
         current_platform_state = [0, 1, 0]  # Default to a far-away platform
         if self.current_platform:
-            p_rect = self.current_platform.get_rect()
-            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
-            dy = (p_rect[1] - (p_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
-            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
-            current_platform_state = [dx, dy, dw]
+            plat_rect = self.current_platform.get_rect()
+            norm_dx = (plat_rect[0] + plat_rect[2]/2 - player_pos[0]) / SCREEN_WIDTH
+            norm_dy = (plat_rect[1] - (player_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
+            norm_dw = (plat_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            current_platform_state = [norm_dx, norm_dy, norm_dw]
 
         # Other platform states
         player_rect = self.player.get_rect()
@@ -277,10 +277,10 @@ class IcyTowerLogic:
         # 2 nearest platforms below
         for p in plats_below[:2]:
             p_rect = p.get_rect()
-            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
-            dy = (p_rect[1] - (p_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
-            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
-            platform_states.extend([dx, dy, dw])
+            norm_dx = (p_rect[0] + p_rect[2]/2 - player_pos[0]) / SCREEN_WIDTH
+            norm_dy = (p_rect[1] - (player_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
+            norm_dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            platform_states.extend([norm_dx, norm_dy, norm_dw])
         # Pad if fewer than 2 platforms are below
         while len(platform_states) < 2 * 3:
             platform_states.extend([0, 1, 0]) # Represents a far-away platform
@@ -289,10 +289,10 @@ class IcyTowerLogic:
         above_platform_features = []
         for p in plats_above[:3]:
             p_rect = p.get_rect()
-            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
-            dy = (p_rect[1] + PLAT_H/2 - p_pos[1]) / SCREEN_HEIGHT
-            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
-            above_platform_features.extend([dx, dy, dw])
+            norm_dx = (p_rect[0] + p_rect[2]/2 - player_pos[0]) / SCREEN_WIDTH
+            norm_dy = (p_rect[1] + PLAT_H/2 - player_pos[1]) / SCREEN_HEIGHT
+            norm_dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            above_platform_features.extend([norm_dx, norm_dy, norm_dw])
         # Pad if fewer than 3 platforms are above
         while len(above_platform_features) < 3 * 3:
             above_platform_features.extend([0, 1, 0])

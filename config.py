@@ -35,6 +35,12 @@ HURRY_UP_FLASH_DURATION_FRAMES = 120  # 2 seconds at 60 FPS
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 MODEL_PATH = "models/icy_tower_model.pth"
 NUM_EPISODES = 200
+BUFFER_SIZE = int(1e5)  # Replay buffer size
+BATCH_SIZE = 64         # Minibatch size
+GAMMA = 0.99            # Discount factor
+TAU = 5e-3              # For soft update of target parameters
+LR = 5e-4               # Learning rate
+UPDATE_EVERY = 4        # How often to update the network
 
 Experience = namedtuple("Experience",
                         ("state", "action", "reward", "next_state", "done")) 
