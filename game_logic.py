@@ -31,8 +31,13 @@ class IcyTowerLogic:
     It can be run headlessly for fast training.
     """
     def __init__(self):
+        # The available actions are discrete: 0 for left, 1 for stay, 2 for right
         self.action_space_n = 3
-        self.state_size = 3 + 5 * 3 # px, vx, vy, and 5 platforms (dx, dy, dw)
+        self.current_platform = None
+
+        # To get the state size, we must first initialize the game to get a valid state.
+        initial_state = self.reset()
+        self.state_size = len(initial_state)
 
     def _rects_collide(self, rect1, rect2):
         # Simple Axis-Aligned Bounding Box collision check
@@ -43,6 +48,7 @@ class IcyTowerLogic:
     def reset(self):
         self.player = LogicPlayer()
         self.platforms = [LogicPlatform(0, SCREEN_HEIGHT-40, SCREEN_WIDTH, 0)]
+        self.current_platform = self.platforms[0]
         self.next_floor_no = 1
         self.platforms.extend(self._generate_platforms(15, SCREEN_HEIGHT-100))
 
@@ -110,6 +116,7 @@ class IcyTowerLogic:
         return landed
 
     def _on_land(self, plat):
+        self.current_platform = plat
         diff = plat.floor_no - self.current_floor
         if diff >= 2: # Multi-floor jump
             self.combo_floors += diff
@@ -172,16 +179,27 @@ class IcyTowerLogic:
         vy = np.clip(p_vel[1] / abs(PLAYER_JUMP), -1, 1)
         player_state = [px, vx, vy]
 
-        # Platform states
+        # Current platform state
+        current_platform_state = [0, 1, 0]  # Default to a far-away platform
+        if self.current_platform:
+            p_rect = self.current_platform.get_rect()
+            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
+            dy = (p_rect[1] - (p_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
+            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            current_platform_state = [dx, dy, dw]
+
+        # Other platform states
         player_rect = self.player.get_rect()
         
+        other_platforms = [p for p in self.platforms if p is not self.current_platform]
+
         # Separate platforms into those above and below the player's feet
         plats_below = sorted(
-            [p for p in self.platforms if p.get_rect()[1] > player_rect[1] + player_rect[3]],
+            [p for p in other_platforms if p.get_rect()[1] > player_rect[1] + player_rect[3]],
             key=lambda p: p.get_rect()[1]
         )
         plats_above = sorted(
-            [p for p in self.platforms if p.get_rect()[1] + PLAT_H < player_rect[1]],
+            [p for p in other_platforms if p.get_rect()[1] + PLAT_H < player_rect[1]],
             key=lambda p: player_rect[1] - (p.get_rect()[1] + PLAT_H)
         )
 
@@ -212,7 +230,7 @@ class IcyTowerLogic:
 
         platform_states.extend(above_platform_features)
 
-        return np.array(player_state + platform_states, dtype=np.float32)
+        return np.array(player_state + current_platform_state + platform_states, dtype=np.float32)
 
     # Dummy methods to match the UI env interface for easy swapping
     def render(self): return True
