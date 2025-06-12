@@ -1,32 +1,42 @@
 import os
 import random
-from collections import deque
+from collections import namedtuple
+
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import numpy as np
+import torch.optim as optim
 
 from config import Experience, DEVICE
 
 class QNetwork(nn.Module):
     def __init__(self, s, a):
         super().__init__()
-        self.fc1 = nn.Linear(s, 128)
-        self.fc2 = nn.Linear(128, 128)
-        self.fc3 = nn.Linear(128, a)
+        self.fc1 = nn.Linear(s, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc3 = nn.Linear(256, a)
 
     def forward(self, x):
         x = F.relu(self.fc1(x)); x = F.relu(self.fc2(x)); return self.fc3(x)
 
 class ReplayBuffer:
-    def __init__(self, size, batch):
-        self.memory = deque(maxlen=size); self.batch = batch
-    def add(self, *e): self.memory.append(Experience(*e))
+    def __init__(self, buffer_size, batch_size):
+        self.memory = []
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
+
+    def add(self, s, a, r, s2, d):
+        self.memory.append(Experience(s, a, r, s2, d))
+        if len(self.memory) > self.buffer_size:
+            self.memory.pop(0)
+
     def sample(self):
-        ex = random.sample(self.memory, self.batch)
-        return Experience(*zip(*ex))
-    def __len__(self): return len(self.memory)
+        experiences = random.sample(self.memory, self.batch_size)
+        return Experience(*zip(*experiences))
+
+    def __len__(self):
+        return len(self.memory)
 
 class DDQNAgent:
     def __init__(self, s, a):
@@ -37,16 +47,19 @@ class DDQNAgent:
         self.opt  = optim.Adam(self.net.parameters(), lr=5e-4)
         self.mem  = ReplayBuffer(int(1e5), 64)
         self.t    = 0
+
     def act(self, state, eps):
         if random.random() < eps: return random.randrange(self.nA)
         with torch.no_grad():
             q = self.net(torch.tensor(state, dtype=torch.float32,
                                        device=DEVICE).unsqueeze(0))
         return int(torch.argmax(q).item())
+
     def step(self, s, a, r, s2, d):
         self.mem.add(s, a, r, s2, d)
         self.t = (self.t+1)%4
         if self.t==0 and len(self.mem)>=64: self.learn()
+
     def learn(self):
         batch = self.mem.sample()
         S  = torch.tensor(np.array(batch.state), dtype=torch.float32).to(DEVICE)

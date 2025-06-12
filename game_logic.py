@@ -32,7 +32,7 @@ class IcyTowerLogic:
     """
     def __init__(self):
         self.action_space_n = 3
-        self.state_size = 6 # px, vx, vy, dx, dy, dw
+        self.state_size = 3 + 5 * 3 # px, vx, vy, and 5 platforms (dx, dy, dw)
 
     def _rects_collide(self, rect1, rect2):
         # Simple Axis-Aligned Bounding Box collision check
@@ -160,25 +160,59 @@ class IcyTowerLogic:
     def _calc_reward(self, prev_score, landed):
         if self.done: return -10
         reward = self.score - prev_score
-        if landed: reward += 1
+        if landed: reward += 0.1
         return reward
 
     def _get_state(self):
-        px = (self.player.pos[0] - SCREEN_WIDTH/2) / (SCREEN_WIDTH/2)
-        vx = np.clip(self.player.vel[0] / (PLAYER_ACC*5), -1, 1)
-        vy = np.clip(self.player.vel[1] / abs(PLAYER_JUMP), -1, 1)
+        # Player state
+        p_pos = self.player.pos
+        p_vel = self.player.vel
+        px = (p_pos[0] - SCREEN_WIDTH/2) / (SCREEN_WIDTH/2)
+        vx = np.clip(p_vel[0] / (PLAYER_ACC*5), -1, 1)
+        vy = np.clip(p_vel[1] / abs(PLAYER_JUMP), -1, 1)
+        player_state = [px, vx, vy]
 
+        # Platform states
         player_rect = self.player.get_rect()
-        above = [p for p in self.platforms if p.get_rect()[1] + PLAT_H < player_rect[1]]
-        if above:
-            tgt = min(above, key=lambda p: player_rect[1] - (p.get_rect()[1] + PLAT_H))
-            tgt_rect = tgt.get_rect()
-            dx = (tgt_rect[0] + tgt_rect[2]/2 - self.player.pos[0]) / SCREEN_WIDTH
-            dy = (tgt_rect[1] + tgt_rect[3]/2 - self.player.pos[1]) / SCREEN_HEIGHT
-            dw = (tgt_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
-        else:
-            dx, dy, dw = 0, 1, 0
-        return np.array([px, vx, vy, dx, dy, dw], dtype=np.float32)
+        
+        # Separate platforms into those above and below the player's feet
+        plats_below = sorted(
+            [p for p in self.platforms if p.get_rect()[1] > player_rect[1] + player_rect[3]],
+            key=lambda p: p.get_rect()[1]
+        )
+        plats_above = sorted(
+            [p for p in self.platforms if p.get_rect()[1] + PLAT_H < player_rect[1]],
+            key=lambda p: player_rect[1] - (p.get_rect()[1] + PLAT_H)
+        )
+
+        platform_states = []
+        
+        # 2 nearest platforms below
+        for p in plats_below[:2]:
+            p_rect = p.get_rect()
+            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
+            dy = (p_rect[1] - (p_pos[1] + PLAYER_H/2)) / SCREEN_HEIGHT
+            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            platform_states.extend([dx, dy, dw])
+        # Pad if fewer than 2 platforms are below
+        while len(platform_states) < 2 * 3:
+            platform_states.extend([0, 1, 0]) # Represents a far-away platform
+
+        # 3 nearest platforms above
+        above_platform_features = []
+        for p in plats_above[:3]:
+            p_rect = p.get_rect()
+            dx = (p_rect[0] + p_rect[2]/2 - p_pos[0]) / SCREEN_WIDTH
+            dy = (p_rect[1] + PLAT_H/2 - p_pos[1]) / SCREEN_HEIGHT
+            dw = (p_rect[2] - PLAT_MIN_W) / (PLAT_MAX_W - PLAT_MIN_W)
+            above_platform_features.extend([dx, dy, dw])
+        # Pad if fewer than 3 platforms are above
+        while len(above_platform_features) < 3 * 3:
+            above_platform_features.extend([0, 1, 0])
+
+        platform_states.extend(above_platform_features)
+
+        return np.array(player_state + platform_states, dtype=np.float32)
 
     # Dummy methods to match the UI env interface for easy swapping
     def render(self): return True
