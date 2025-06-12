@@ -3,8 +3,9 @@ import sys
 
 try:
     import pygame
+    from tqdm import tqdm
 except ImportError:
-    print("Pygame not found. UI-based modes will be unavailable.")
+    print("Pygame or tqdm not found. UI-based modes will be unavailable.")
     pygame = None
 
 from config import (
@@ -47,26 +48,39 @@ def train_agent(with_ui=True, num_episodes=200):
         agent.load(MODEL_PATH)
 
     eps = 1.0
-    for ep in range(1, num_episodes + 1):
+    ep_bar = tqdm(range(1, num_episodes + 1), desc="Episodes", unit="ep")
+    for ep in ep_bar:
         s = env.reset()
         rsum = 0
         done = False
+
+        if not with_ui:
+            step_bar = tqdm(desc=f"Ep {ep}", unit="step", leave=False)
+        
         while not done:
             a = agent.act(s, eps)
             s2, r, done, _ = env.step(a)
             agent.step(s, a, r, s2, done)
             s = s2
             rsum += r
+
+            if not with_ui:
+                step_bar.update(1)
+                score = env.score
+                step_bar.set_postfix(score=f"{score}")
+
             if with_ui and not env.render():
                 agent.save(MODEL_PATH)
                 print(f"\nTraining stopped. Model saved to {MODEL_PATH}")
                 env.close()
                 return
+        
+        if not with_ui:
+            step_bar.close()
 
         eps = max(0.01, eps * 0.995)
         score = env.logic.score if with_ui else env.score
-        print(f"Ep {ep:3d} | score {score:5d} | ep-reward {rsum:6.1f} | ε {eps:.3f}", end='\r')
-        if ep % 10 == 0 or ep == num_episodes: print()
+        ep_bar.set_postfix(score=f"{score:5d}", reward=f"{rsum:6.1f}", eps=f"{eps:.3f}")
 
     agent.save(MODEL_PATH)
     print(f"\nFinished training {num_episodes} episodes. Model saved to {MODEL_PATH}")
