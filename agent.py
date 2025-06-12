@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import numpy as np
 
 from config import Experience, DEVICE
 
@@ -48,10 +49,10 @@ class DDQNAgent:
         if self.t==0 and len(self.mem)>=64: self.learn()
     def learn(self):
         batch = self.mem.sample()
-        S  = torch.tensor(batch.state, dtype=torch.float32).to(DEVICE)
+        S  = torch.tensor(np.array(batch.state), dtype=torch.float32).to(DEVICE)
         A  = torch.tensor(batch.action).unsqueeze(1).to(DEVICE)
         R  = torch.tensor(batch.reward, dtype=torch.float32).unsqueeze(1).to(DEVICE)
-        S2 = torch.tensor(batch.next_state, dtype=torch.float32).to(DEVICE)
+        S2 = torch.tensor(np.array(batch.next_state), dtype=torch.float32).to(DEVICE)
         D  = torch.tensor(batch.done, dtype=torch.float32).unsqueeze(1).to(DEVICE)
 
         next_a = self.net(S2).argmax(1, keepdim=True)
