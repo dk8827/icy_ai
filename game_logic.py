@@ -5,7 +5,7 @@ from config import (
     PLAYER_ACC, PLAYER_FRICTION, PLAYER_JUMP, PLAT_MIN_W, PLAT_MAX_W,
     PLAT_H, PLAT_SPACING, COMBO_TIMEOUT_FRAMES, BASE_SCROLL_SPEED,
     SCROLL_ACCELERATION, SPEED_UP_INTERVAL_SECONDS, MAX_SPEED_UPS,
-    HURRY_UP_FLASH_DURATION_FRAMES
+    HURRY_UP_FLASH_DURATION_FRAMES, PLAT_W_DECAY_RATE, PLAT_W_RANDOMNESS
 )
 
 # These are simple data classes, replacing pygame.sprite.Sprite
@@ -185,8 +185,13 @@ class IcyTowerLogic:
     def _generate_platforms(self, n, y_start):
         plats = []
         for i in range(n):
-            w = random.randint(PLAT_MIN_W, PLAT_MAX_W)
-            x = random.randint(0, SCREEN_WIDTH - w)
+            base_width = PLAT_MAX_W - (self.next_floor_no * PLAT_W_DECAY_RATE)
+            random_offset = random.uniform(-PLAT_W_RANDOMNESS, PLAT_W_RANDOMNESS)
+            w = max(PLAT_MIN_W, base_width + random_offset)
+            
+            x_limit = SCREEN_WIDTH - int(w)
+            x = random.randint(0, x_limit if x_limit > 0 else 0)
+
             y = y_start - i * PLAT_SPACING - random.randint(0, 20) # Add some variance
             plats.append(LogicPlatform(x, y, w, self.next_floor_no))
             self.next_floor_no += 1

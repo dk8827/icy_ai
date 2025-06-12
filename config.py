@@ -5,8 +5,10 @@ from collections import namedtuple
 # Screen and Player dimensions
 SCREEN_WIDTH,  SCREEN_HEIGHT = 400, 600
 PLAYER_W,      PLAYER_H      = 30, 40
-PLAT_MIN_W,    PLAT_MAX_W    = 50, 120
+PLAT_MIN_W,    PLAT_MAX_W    = 50, 150
 PLAT_H,        PLAT_SPACING  = 20, 90
+PLAT_W_DECAY_RATE = 1
+PLAT_W_RANDOMNESS = 15
 
 # Physics constants
 PLAYER_ACC,    PLAYER_GRAV   = 0.8, 0.6
