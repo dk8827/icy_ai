@@ -220,7 +220,7 @@ class IcyTowerLogic:
             x_limit = SCREEN_WIDTH - int(w)
             x = random.randint(0, x_limit if x_limit > 0 else 0)
 
-            y = y_start - i * PLAT_SPACING - random.randint(0, 20) # Add some variance
+            y = y_start - i * PLAT_SPACING
             plats.append(LogicPlatform(x, y, w, self.next_floor_no))
             self.next_floor_no += 1
         return plats
