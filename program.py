@@ -17,8 +17,9 @@ from pygame_env import IcyTowerPygameEnv
 from agent import DDQNAgent
 
 
-def human_play():
-    env = IcyTowerPygameEnv()
+def human_play(screen):
+    pygame.display.set_caption("Icy Tower - Human Play")
+    env = IcyTowerPygameEnv(screen=screen)
     env.reset()
     done = False
 
@@ -39,8 +40,14 @@ def human_play():
     env.close()
 
 
-def train_agent(with_ui=True, num_episodes=200):
-    env = IcyTowerPygameEnv() if with_ui else IcyTowerLogic()
+def train_agent(with_ui=True, num_episodes=200, screen=None):
+    if with_ui:
+        if not screen:
+            raise ValueError("A screen must be provided for UI training.")
+        pygame.display.set_caption("Icy Tower - Training")
+        env = IcyTowerPygameEnv(screen=screen)
+    else:
+        env = IcyTowerLogic()
 
     agent = DDQNAgent(env.state_size, env.action_space_n)
     if os.path.exists(MODEL_PATH):
@@ -105,13 +112,14 @@ def train_agent(with_ui=True, num_episodes=200):
     env.close()
 
 
-def ai_play():
+def ai_play(screen):
     if not os.path.exists(MODEL_PATH):
         print(f"No model found at {MODEL_PATH}. Please train the AI first.")
         if pygame: pygame.time.wait(2000)
         return
 
-    env = IcyTowerPygameEnv()
+    pygame.display.set_caption("Icy Tower - AI Play")
+    env = IcyTowerPygameEnv(screen=screen)
     agent = DDQNAgent(env.state_size, env.action_space_n)
     agent.load(MODEL_PATH)
 
@@ -154,10 +162,10 @@ def main_menu():
     clock = pygame.time.Clock()
 
     buttons = {
-        "Play Game (Keyboard)": (human_play, None),
-        "Learn with UI": (train_agent, True),
-        "Learn without UI": (train_agent, False),
-        "Play using AI": (ai_play, None),
+        "Play Game (Keyboard)": (human_play, {}),
+        "Learn with UI": (train_agent, {"with_ui": True}),
+        "Learn without UI": (train_agent, {"with_ui": False, "num_episodes": 1000}),
+        "Play using AI": (ai_play, {}),
     }
     button_rects = []
     y_start = SCREEN_HEIGHT / 2 - (len(buttons) * 60) / 2
@@ -181,18 +189,24 @@ def main_menu():
                 for i, rect in enumerate(button_rects):
                     if rect.collidepoint(mouse_pos):
                         key = list(buttons.keys())[i]
-                        func, arg = buttons[key]
+                        func, kwargs = buttons[key]
 
-                        pygame.quit()
-                        if arg is not None:
-                            func(with_ui=arg)
+                        is_ui_action = not ("with_ui" in kwargs and not kwargs["with_ui"])
+
+                        if is_ui_action:
+                            kwargs["screen"] = screen
+                            func(**kwargs)
+                            # Redraw menu by continuing the loop
+                            pygame.display.set_caption("Icy Tower - Main Menu")
                         else:
-                            func()
-
-                        # Re-initialize for the menu
-                        pygame.init()
-                        screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-                        pygame.display.set_caption("Icy Tower - Main Menu")
+                            # For headless mode, we don't want to freeze the UI
+                            # We can run it and let the user see the console output
+                            # The menu remains interactive.
+                            # For a better UX, one might run this in a separate thread.
+                            # For now, this is simple and works.
+                            print("\nStarting headless training. Check console for progress.")
+                            func(**kwargs)
+                            print("\nHeadless training finished.")
 
         pygame.display.flip()
         clock.tick(30)

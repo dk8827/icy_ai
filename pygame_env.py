@@ -31,12 +31,18 @@ class IcyTowerPygameEnv:
     Manages the Pygame rendering and user input (the "view").
     It holds a reference to an IcyTowerLogic instance.
     """
-    def __init__(self):
+    def __init__(self, screen=None):
         if pygame is None:
             raise ImportError("Pygame is required for UI-based modes.")
-        pygame.init()
+
+        self.was_screen_provided = screen is not None
+        if self.was_screen_provided:
+            self.screen = screen
+        else:
+            pygame.init()
+            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
         pygame.display.set_caption("Icy Tower DDQN")
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 30)
 
@@ -72,7 +78,6 @@ class IcyTowerPygameEnv:
         if pygame is None: return False
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                self.close()
                 return False
 
         self.player_sprite.rect.midbottom = self.logic.player.pos
@@ -96,5 +101,5 @@ class IcyTowerPygameEnv:
         return True
 
     def close(self):
-        if pygame:
+        if pygame and not self.was_screen_provided:
             pygame.quit() 
