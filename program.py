@@ -82,8 +82,6 @@ def train_agent(with_ui=True, num_episodes=200, screen=None):
 
                 if steps_since_score_increase >= max_steps_without_progress:
                     done = True
-                    # A brief message for the console, not cluttering the progress bar
-                    tqdm.write(f"Episode {ep} stopped early: no score increase for {max_steps_without_progress} steps.")
 
             agent.step(s, a, r, s2, done)
             s = s2
@@ -123,17 +121,63 @@ def ai_play(screen):
     agent = DDQNAgent(env.state_size, env.action_space_n)
     agent.load(MODEL_PATH)
 
+    main_menu_button_rect = pygame.Rect(SCREEN_WIDTH - 160, 10, 150, 40)
+    button_font = pygame.font.SysFont(None, 30)
+
     s = env.reset()
     done = False
     running = True
+    game_over_time = None
+
     while running:
-        a = agent.act(s, eps=0.0)
+        mouse_pos = pygame.mouse.get_pos()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if main_menu_button_rect.collidepoint(mouse_pos):
+                    running = False
+        
+        if not running:
+            continue
+
+        if done:
+            if game_over_time is None:
+                game_over_time = pygame.time.get_ticks()
+            
+            if pygame.time.get_ticks() - game_over_time > 1000:
+                s = env.reset()
+                done = False
+                game_over_time = None
+        
         if not done:
+            a = agent.act(s, eps=0.0)
             s2, r, done, _ = env.step(a)
             s = s2
 
-        if not env.render():
-            running = False
+        env.player_sprite.rect.midbottom = env.logic.player.pos
+
+        if len(env.platform_sprites) != len(env.logic.platforms):
+             env._sync_sprites()
+
+        for sprite in env.all_sprites:
+            sprite.rect.y -= env.logic.camera_y
+
+        screen.fill(BACKGROUND)
+        env.all_sprites.draw(screen)
+        
+        score_text = env.font.render(f"SCORE {env.logic.score}", True, (0,0,0))
+        screen.blit(score_text, (10, 10))
+
+        is_hovered = main_menu_button_rect.collidepoint(mouse_pos)
+        draw_button(screen, main_menu_button_rect, "Main Menu", button_font, is_hovered)
+
+        pygame.display.flip()
+
+        for sprite in env.all_sprites:
+            sprite.rect.y += env.logic.camera_y
+
+        env.clock.tick(60)
 
     env.close()
 
@@ -164,7 +208,7 @@ def main_menu():
     buttons = {
         "Play Game (Keyboard)": (human_play, {}),
         "Learn with UI": (train_agent, {"with_ui": True}),
-        "Learn without UI": (train_agent, {"with_ui": False, "num_episodes": 1000}),
+        "Learn without UI": (train_agent, {"with_ui": False, "num_episodes": 200}),
         "Play using AI": (ai_play, {}),
     }
     button_rects = []
