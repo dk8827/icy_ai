@@ -33,9 +33,12 @@ class IcyTowerLogic:
     It can be run headlessly for fast training.
     """
     def __init__(self):
-        # The available actions are discrete: 0 for left, 1 for stay, 2 for right
-        self.action_space_n = 3
+        # The available actions are discrete
+        # 0: left, 1: right, 2: stay
+        # 3: left+jump, 4: right+jump, 5: stay+jump
+        self.action_space_n = 6
         self.current_platform = None
+        self.on_ground = True
 
         # To get the state size, we must first initialize the game to get a valid state.
         initial_state = self.reset()
@@ -61,6 +64,7 @@ class IcyTowerLogic:
         self.total_frames = 0
         self.score, self.camera_y = 0, 0
         self.done = False
+        self.on_ground = True
 
         # New scrolling mechanics
         self.scrolling = False
@@ -95,8 +99,32 @@ class IcyTowerLogic:
     def _handle_player(self, action):
         p = self.player
         p.acc[0] = 0
-        if action == 0: p.acc[0] = -PLAYER_ACC  # Left
-        if action == 2: p.acc[0] = PLAYER_ACC   # Right
+
+        if self.on_ground:
+            # Check if we have walked off the current platform
+            if self.current_platform:
+                plat_rect = self.current_platform.get_rect()
+                player_rect = p.get_rect()
+                player_left, _, player_w, _ = player_rect
+                player_right = player_left + player_w
+                plat_left, _, plat_w, _ = plat_rect
+                plat_right = plat_left + plat_w
+                if player_right < plat_left or player_left > plat_right:
+                    self.on_ground = False
+
+        # Horizontal Movement
+        # Actions: 0:l, 1:r, 2:s, 3:l+j, 4:r+j, 5:s+j
+        move_action = action % 3  # 0: left, 1: right, 2: stay
+        if move_action == 0:
+            p.acc[0] = -PLAYER_ACC  # Left
+        elif move_action == 1:
+            p.acc[0] = PLAYER_ACC   # Right
+
+        # Jumping
+        is_jump_action = action >= 3
+        if is_jump_action and self.on_ground:
+            p.vel[1] = PLAYER_JUMP
+            self.on_ground = False
 
         p.acc[0] += p.vel[0] * PLAYER_FRICTION
         p.vel[0] += p.acc[0]
@@ -115,7 +143,7 @@ class IcyTowerLogic:
     def _handle_collisions(self):
         landed = False
         player_rect = self.player.get_rect()
-        if self.player.vel[1] > 0: # Falling
+        if self.player.vel[1] >= 0: # Falling or at rest
             for plat in self.platforms:
                 plat_rect = plat.get_rect()
                 # A more precise collision check for landing
@@ -123,7 +151,7 @@ class IcyTowerLogic:
                    player_rect[1] + player_rect[3] < plat_rect[1] + self.player.vel[1] + 1:
                     self.player.pos[1] = plat_rect[1]
                     self.player.vel[1] = 0
-                    self.player.vel[1] = PLAYER_JUMP # Jump
+                    self.on_ground = True
                     self._on_land(plat)
                     landed = True
                     break # Land on one platform at a time

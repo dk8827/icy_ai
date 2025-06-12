@@ -25,11 +25,21 @@ def human_play(screen):
 
     running = True
     while running:
-        action = 1  # Stay still by default
         if pygame is None: break
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT]:  action = 0
-        if keys[pygame.K_RIGHT]: action = 2
+
+        # Actions: 0:left, 1:right, 2:stay
+        move_action = 2  # Default: stay
+        if keys[pygame.K_LEFT]:
+            move_action = 0
+        elif keys[pygame.K_RIGHT]:
+            move_action = 1
+
+        jump_pressed = keys[pygame.K_SPACE] or keys[pygame.K_UP]
+        
+        action = move_action
+        if jump_pressed:
+            action += 3
 
         if not done:
             _, _, done, _ = env.step(action)
