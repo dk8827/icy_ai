@@ -83,7 +83,14 @@ class IcyTowerLogic:
         p.vel[1] += p.acc[1]
         p.pos[0] += p.vel[0] + 0.5 * p.acc[0]
         p.pos[1] += p.vel[1] + 0.5 * p.acc[1]
-        p.pos[0] %= SCREEN_WIDTH # wrap-around
+        
+        # Wall collisions
+        if p.pos[0] < PLAYER_W / 2:
+            p.pos[0] = PLAYER_W / 2
+            p.vel[0] = 0
+        elif p.pos[0] > SCREEN_WIDTH - PLAYER_W / 2:
+            p.pos[0] = SCREEN_WIDTH - PLAYER_W / 2
+            p.vel[0] = 0
 
     def _handle_collisions(self):
         landed = False
